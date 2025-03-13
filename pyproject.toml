@@ -40,7 +40,6 @@ classifiers = [
 dependencies = [
     "torch",
     "einops",
-    "flash-attn>=2.0.0",
     "torchtyping>=0.1.4, <1.0",
 ]
 

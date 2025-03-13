@@ -71,7 +71,7 @@ def train(
     train_loader: DataLoader,
     denorm: Callable[[Tensor["B", "D"]], Tensor["B", "D"]],
     epochs: int = 100,
-    device_str: str = "cuda:0",
+    device_str: str = "cpu",
     dtype_str: str = "float32",
 ):
     device = t.device(device_str)
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     # Plot the first 500 points
     plot_samples(*train_loader.dataset[:500])
 
-    device = "cuda:0"
+    device = "cpu"
     dtype = "float32"
 
     net = LinearNetwork(

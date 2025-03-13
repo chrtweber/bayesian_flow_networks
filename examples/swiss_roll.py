@@ -54,7 +54,7 @@ def plot_samples(
     plt.title("BFN Samples")
     plt.xlabel("Feature 1")
     plt.ylabel("Feature 2")
-    # plt.show()
+    plt.show()
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     plt.savefig(fpath)
     plt.close()
@@ -66,7 +66,7 @@ def train(
     val_loader: DataLoader,
     denorm: Callable[[Tensor["B", "D"]], Tensor["B", "D"]],
     epochs: int = 100,
-    device_str: str = "cuda:0",
+    device_str: str = "cpu",
     dtype_str: str = "float32",
 ):
     device = t.device(device_str)
@@ -99,7 +99,7 @@ def train(
 if __name__ == "__main__":
 
     train_loader, val_loader, denorm = make_roll_dset(int(1e4))
-    device = "cuda:0"
+    device = "cpu"
     dtype = "float32"
 
     net = LinearNetwork(

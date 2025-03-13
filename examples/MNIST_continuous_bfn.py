@@ -60,7 +60,7 @@ def plot_samples(samples: t.Tensor, fpath: str = "outputs/mnist_samples.png"):
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     plt.tight_layout()
     plt.savefig(fpath)
-    # plt.show()
+    plt.show()
     plt.close()
 
 
@@ -68,7 +68,7 @@ def train(
     model: ContinuousBFN,
     train_loader: DataLoader,
     epochs: int = 200,
-    device_str: str = "cuda:0",
+    device_str: str = "cpu",
     dtype_str: str = "float32",
 ):
     device = t.device(device_str)
@@ -111,7 +111,7 @@ def train(
 if __name__ == "__main__":
 
     train_loader = get_mnist()
-    device = "cuda:0"
+    device = "cpu"
     dtype = "float32"
 
     net = Unet(
