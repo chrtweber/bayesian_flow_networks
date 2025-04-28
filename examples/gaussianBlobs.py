@@ -11,38 +11,41 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Swiss roll example using a simple continuous BFN"""
+"""Gaussian Blob example using a simple continuous BFN"""
 
 import os
 import torch as t
 import matplotlib.pyplot as plt
 
+import numpy as np
+
 from typing import Callable, Tuple
 from torchtyping import TensorType as Tensor
-from sklearn.datasets import make_swiss_roll
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
 from torch_bfn import ContinuousBFN, LinearNetwork
 from torch_bfn.utils import EMA, norm_denorm, str_to_torch_dtype
 
 
-def make_roll_dset(
-    n: int, bs: int = 128, noise: float = 0.3, dtype: t.dtype = t.float32
+def make_gaussian_mixture_dset(
+    n: int, bs: int = 128, dtype: t.dtype = t.float32
 ) -> Tuple[
     DataLoader, DataLoader, Callable[[Tensor["B", "D"]], Tensor["B", "D"]]
 ]:
-    print("make_roll_dset")
-    # Create a normalised 'swiss roll' dataset
-    X_np, _ = make_swiss_roll(n_samples=n, noise=noise)
-    print("make_swiss_roll\n", X_np)
-    # take only 0 and 2nd col of array and divide all elements by 10
-    # omit 1st col because make_swiss_roll creates 3D Dataset and we want 2D
-    X_np = X_np[:, [0, 2]] / 10.0
-    print("drop y dim and divide by 10\n", X_np)
+    centers = [(-5, -5), (0, 0), (5, 5)]
+    X_np = []
+
+    for cx, cy in centers:
+        samples = np.random.randn(n // len(centers), 2) * 0.5 + np.array(
+            [cx, cy]
+        )
+        X_np.append(samples)
+
+    X_np = np.concatenate(X_np, axis=0)
     X = t.tensor(X_np, dtype=dtype)
     X, denorm = norm_denorm(X)
+
     dset = TensorDataset(X)
-    print("TensorDataset\n", X)
     train_size = len(dset) - bs
     val_size = len(dset) - train_size
     train_dset, val_dset = random_split(dset, [train_size, val_size])
@@ -104,7 +107,7 @@ def train(
 
 if __name__ == "__main__":
 
-    train_loader, val_loader, denorm = make_roll_dset(int(1e4))
+    train_loader, val_loader, denorm = make_gaussian_mixture_dset(int(1e4))
     device = "cpu"
     dtype = "float32"
 

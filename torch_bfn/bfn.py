@@ -58,7 +58,7 @@ class ContinuousBFN(nn.Module):
         self.net.train()
 
         # Assert that the network has the right dimensions
-        bs = 16
+        bs = 16  # batch size
         test_batch = t.randn(
             (bs, *self.dim), device=self.device, dtype=self.dtype
         )
@@ -86,6 +86,7 @@ class ContinuousBFN(nn.Module):
         x_min=-1.0,
         x_max=1.0,
     ) -> Tensor["B", "D"]:
+        # print("cts_output_prediction")
         assert (time >= 0).all() and (time <= 1).all()
         assert mu.dim() == time.dim()
         zeros = t.zeros_like(mu)
@@ -102,6 +103,7 @@ class ContinuousBFN(nn.Module):
                 eps = self.net(mu, time.view(-1), cond)
         else:
             eps = self.net(mu, time.view(-1))
+        # implicit bayesian update
         x = (mu / gamma) - t.sqrt((1.0 - gamma) / gamma) * eps
         x = t.clip(x, x_min, x_max)
         return t.where(time < t_min, zeros, x)
@@ -126,6 +128,7 @@ class ContinuousBFN(nn.Module):
         Returns:
             Tensor["B"]: batch loss
         """
+        # print("loss")
         s1 = t.tensor([sigma_1], device=x.device, dtype=self.dtype)
         time = t.rand((x.size(0),), device=x.device, dtype=self.dtype)
         time = self._pad_to_dim(time)
@@ -161,6 +164,7 @@ class ContinuousBFN(nn.Module):
         Returns:
             Tensor["B"]: batch loss
         """
+        # print("discrete_loss")
         s1 = t.tensor([sigma_1], device=x.device)
         i = t.randint(1, n + 1, (x.size(0),)).to(x.device)
         i = self._pad_to_dim(i)
@@ -196,6 +200,7 @@ class ContinuousBFN(nn.Module):
         cond_scale: Optional[float] = None,  # 1.
         rescaled_phi: Optional[float] = None,  # 0.0,
     ) -> Union[Tensor["n_samples", "dim"], Tensor["n_samples", "Y", "dim"]]:
+        # print("sample")
         if exists(cond):
             if cond.ndim == 1:
                 cond = cond[:, None]

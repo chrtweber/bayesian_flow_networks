@@ -81,31 +81,41 @@ def train(
     )
     ema.register(model)
 
+    print('trainLoader: \n', train_loader)
+
     for epoch in range(epochs):
+        print('epoch ', epoch)
         loss = None
         for batch in train_loader:
+            print('process batch...\n')
             X, y = batch
             X, y = X.to(device, dtype), y.to(device)
+            # print('computing loss...\n')
             loss = model.loss(X, y, sigma_1=1e-3).mean()
             # loss = model.discrete_loss(X, y, sigma_1=0.01, n=30).mean()
+            # print('reset gradients...\n')
             opt.zero_grad()
+            # print('backward loss...\n')
             loss.backward()
+            # print('clip gradient norm...\n')
             t.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            # print('optimization step...\n')
             opt.step()
+            # print('update model...\n')
             ema.update(model)
 
         if epoch % 1 == 0:
             assert loss is not None
             print(loss.item())
-            sample_classes = t.arange(10, device=device)
-            samples = model.sample(
-                1,
-                sigma_1=1e-5,
-                n_timesteps=20,
-                cond=sample_classes,
-                cond_scale=7.0,
-            ).squeeze(1)
-            plot_samples(samples, f"outputs/mnist_samples_{epoch:03d}.png")
+            # sample_classes = t.arange(10, device=device)
+            # samples = model.sample(
+            #     1,
+            #     sigma_1=1e-5,
+            #     n_timesteps=20,
+            #     cond=sample_classes,
+            #     cond_scale=7.0,
+            # ).squeeze(1)
+            # plot_samples(samples, f"outputs/mnist_samples_{epoch:03d}.png")
 
 
 if __name__ == "__main__":
@@ -122,6 +132,7 @@ if __name__ == "__main__":
         cond_drop_prob=0.5,
         flash_attn=True,
     )
+    print('created Unet...\n')
 
     model = ContinuousBFN(
         dim=(1, 28, 28),
@@ -129,13 +140,16 @@ if __name__ == "__main__":
         device_str=device,
         dtype_str=dtype,
     )
+    print('created ContinuousBFN...\n')
 
     sample_classes = t.arange(10, device=t.device(device))
     samples = model.sample(
         1, sigma_1=1e-5, n_timesteps=20, cond=sample_classes, cond_scale=7.0
     ).squeeze(1)
+    print('initial samples...\n')
     plot_samples(samples, "outputs/initial_mnist_samples.png")
 
+    print('training model...\n')
     train(
         model,
         train_loader,
@@ -146,4 +160,5 @@ if __name__ == "__main__":
     samples = model.sample(
         1, sigma_1=1e-5, n_timesteps=20, cond=sample_classes, cond_scale=7.0
     ).squeeze(1)
+    print('final samples...\n')
     plot_samples(samples, "outputs/final_mnist_samples.png")

@@ -11,38 +11,77 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Swiss roll example using a simple continuous BFN"""
+"""SCM Data example using a simple continuous BFN"""
 
 import os
 import torch as t
 import matplotlib.pyplot as plt
 
+import numpy as np
+
 from typing import Callable, Tuple
 from torchtyping import TensorType as Tensor
-from sklearn.datasets import make_swiss_roll
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
 from torch_bfn import ContinuousBFN, LinearNetwork
 from torch_bfn.utils import EMA, norm_denorm, str_to_torch_dtype
 
+from dowhy.datasets import linear_dataset
 
-def make_roll_dset(
-    n: int, bs: int = 128, noise: float = 0.3, dtype: t.dtype = t.float32
+
+def make_scm_dset(
+    n: int, bs: int = 128, dtype: t.dtype = t.float32
 ) -> Tuple[
     DataLoader, DataLoader, Callable[[Tensor["B", "D"]], Tensor["B", "D"]]
 ]:
-    print("make_roll_dset")
-    # Create a normalised 'swiss roll' dataset
-    X_np, _ = make_swiss_roll(n_samples=n, noise=noise)
-    print("make_swiss_roll\n", X_np)
-    # take only 0 and 2nd col of array and divide all elements by 10
-    # omit 1st col because make_swiss_roll creates 3D Dataset and we want 2D
-    X_np = X_np[:, [0, 2]] / 10.0
-    print("drop y dim and divide by 10\n", X_np)
+    # Generate synthetic SCM data: treatment → outcome
+    data = linear_dataset(
+        beta=0.8,
+        num_common_causes=0,
+        num_samples=n,
+        num_treatments=1,
+        treatment_is_binary=False,
+        outcome_is_binary=False,
+    )
+
+    # Grab treatment and outcome columns
+    df = data["df"]
+    treatment_col = data["treatment_name"][0]
+    outcome_col = data["outcome_name"][0]
+
+    X_np = df[[treatment_col, outcome_col]].to_numpy().astype(np.float32)
     X = t.tensor(X_np, dtype=dtype)
     X, denorm = norm_denorm(X)
+
     dset = TensorDataset(X)
-    print("TensorDataset\n", X)
+    train_size = len(dset) - bs
+    val_size = len(dset) - train_size
+    train_dset, val_dset = random_split(dset, [train_size, val_size])
+    train_loader = DataLoader(train_dset, batch_size=bs, shuffle=True)
+    val_loader = DataLoader(val_dset, batch_size=bs, shuffle=False)
+    return train_loader, val_loader, denorm
+
+
+def generate_do_dataset(
+    x_value: float,
+    n: int = 1000,
+    beta: float = 0.8,
+    noise_std: float = 0.05,
+    bs: int = 128,
+    dtype: t.dtype = t.float32,
+) -> Tuple[DataLoader, DataLoader, Callable]:
+    # Add small variance around the intervention value
+    X_np = np.random.normal(loc=x_value, scale=0.05, size=(n, 1))
+
+    # Outcome from SCM: Y = beta * X + ε
+    noise = np.random.normal(loc=0.0, scale=noise_std, size=(n, 1))
+    Y_np = beta * X_np + noise
+
+    data_np = np.hstack([X_np, Y_np])
+    X = t.tensor(data_np, dtype=dtype)
+    X, denorm = norm_denorm(X)
+
+    dset = TensorDataset(X)
     train_size = len(dset) - bs
     val_size = len(dset) - train_size
     train_dset, val_dset = random_split(dset, [train_size, val_size])
@@ -104,7 +143,11 @@ def train(
 
 if __name__ == "__main__":
 
-    train_loader, val_loader, denorm = make_roll_dset(int(1e4))
+    train_loader, val_loader, denorm = make_scm_dset(int(1e4))
+    # train_loader, val_loader, denorm = generate_do_dataset(
+    #     x_value=2.0,
+    #     n=1000,
+    # )
     device = "cpu"
     dtype = "float32"
 
