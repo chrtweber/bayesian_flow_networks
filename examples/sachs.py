@@ -51,27 +51,30 @@ def load_sachs_dataset() -> (
 
     denorm = lambda x: x * X_std + X_mean  # Denormalization function
 
-    return (
-        train_loader,
-        val_loader,
-        denorm,
-        X_norm,
-    )
+    pca = PCA(n_components=2)
+    samples_real = X.numpy()
+    samples_real_2d = pca.fit_transform(samples_real)
+
+    return (train_loader, val_loader, denorm, X_norm, pca)
 
 
 def plot_highdim_samples(
     denormed_samples: Tensor["B", "D"],
+    pca: PCA,
     fpath: str = "outputs/samples_pca.png",
     pause: float = 0.1,
 ):
     samples = denormed_samples.numpy()
-    pca = PCA(n_components=2)
-    samples_2d = pca.fit_transform(samples)
+    samples_2d = pca.transform(samples)
     plt.figure(figsize=(6, 4))
     plt.scatter(samples_2d[:, 0], samples_2d[:, 1], edgecolor="k", alpha=0.5)
     plt.title("BFN Samples (PCA) " + fpath)
     plt.xlabel("PC1")
     plt.ylabel("PC2")
+
+    plt.xlim(-1000, 5000)
+    plt.ylim(-500, 4000)
+
     plt.show(block=False)
     plt.pause(pause)
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
@@ -84,6 +87,7 @@ def train(
     train_loader: DataLoader,
     val_loader: DataLoader,
     denorm: Callable[[Tensor["B", "D"]], Tensor["B", "D"]],
+    pca: PCA,
     epochs: int = 100,
     device_str: str = "cpu",
     dtype_str: str = "float32",
@@ -96,7 +100,7 @@ def train(
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     ema.register(model)
 
-    for epoch in range(epochs):
+    for epoch in range(epochs + 1):
         loss = None
         for batch in train_loader:
             X = batch[0].to(device, dtype)
@@ -112,7 +116,7 @@ def train(
             print(f"Epoch {epoch}: Loss = {loss.item():.4f}")
             samples = model.sample(1000, sigma_1=0.01, n_timesteps=10)
             plot_highdim_samples(
-                denorm(samples.cpu()), f"outputs/sachs_samples_{epoch}.png"
+                denorm(samples.cpu()), pca, f"outputs/sachs_samples_{epoch}.png"
             )
 
 
@@ -120,7 +124,7 @@ if __name__ == "__main__":
     device = "cpu"
     dtype = "float32"
 
-    train_loader, val_loader, denorm, X_norm = load_sachs_dataset()
+    train_loader, val_loader, denorm, X_norm, pca = load_sachs_dataset()
 
     net = LinearNetwork(
         dim=11,  # Number of variables in Sachs dataset
@@ -145,7 +149,7 @@ if __name__ == "__main__":
 
     # Plot real Sachs data using existing function
     plot_highdim_samples(
-        denorm(X_norm), fpath="outputs/sachs_real_samples.png", pause=3
+        denorm(X_norm), pca, fpath="outputs/sachs_real_samples.png", pause=3
     )
 
     train(
@@ -153,7 +157,8 @@ if __name__ == "__main__":
         train_loader,
         val_loader,
         denorm,
-        epochs=5000,
+        pca,
+        epochs=2000,
         device_str=device,
         dtype_str=dtype,
     )
