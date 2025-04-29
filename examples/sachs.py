@@ -58,6 +58,20 @@ def load_sachs_dataset() -> (
     return (train_loader, val_loader, denorm, X_norm, pca)
 
 
+def save_checkpoint(model, epoch: int, path: str = "trained_models"):
+    os.makedirs(path, exist_ok=True)
+    fpath = os.path.join(path, f"bfn_epoch_{epoch}.pt")
+    torch.save(model.state_dict(), fpath)
+    print(f"Saved checkpoint at: {fpath}")
+
+
+def load_checkpoint(model, epoch: int, path: str = "trained_models"):
+    fpath = os.path.join(path, f"bfn_epoch_{epoch}.pt")
+    model.load_state_dict(torch.load(fpath))
+    print(f"Loaded checkpoint from: {fpath}")
+    return model
+
+
 def plot_highdim_samples(
     denormed_samples: Tensor["B", "D"],
     pca: PCA,
@@ -65,15 +79,15 @@ def plot_highdim_samples(
     pause: float = 0.1,
 ):
     samples = denormed_samples.numpy()
-    samples_2d = pca.transform(samples)
+    samples_2d = pca.fit_transform(samples)
     plt.figure(figsize=(6, 4))
     plt.scatter(samples_2d[:, 0], samples_2d[:, 1], edgecolor="k", alpha=0.5)
     plt.title("BFN Samples (PCA) " + fpath)
     plt.xlabel("PC1")
     plt.ylabel("PC2")
 
-    plt.xlim(-1000, 5000)
-    plt.ylim(-500, 4000)
+    plt.xlim(-400, 600)
+    plt.ylim(-100, 200)
 
     plt.show(block=False)
     plt.pause(pause)
@@ -88,6 +102,7 @@ def train(
     val_loader: DataLoader,
     denorm: Callable[[Tensor["B", "D"]], Tensor["B", "D"]],
     pca: PCA,
+    start_epoch: int = 0,
     epochs: int = 100,
     device_str: str = "cpu",
     dtype_str: str = "float32",
@@ -100,7 +115,7 @@ def train(
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     ema.register(model)
 
-    for epoch in range(epochs + 1):
+    for epoch in range(start_epoch, start_epoch + epochs + 1):
         loss = None
         for batch in train_loader:
             X = batch[0].to(device, dtype)
@@ -116,8 +131,13 @@ def train(
             print(f"Epoch {epoch}: Loss = {loss.item():.4f}")
             samples = model.sample(1000, sigma_1=0.01, n_timesteps=10)
             plot_highdim_samples(
-                denorm(samples.cpu()), pca, f"outputs/sachs_samples_{epoch}.png"
+                denorm(samples.cpu()),
+                pca,
+                f"outputs/sachs_samples_{epoch}.png",
             )
+
+        if epoch % 1000 == 0:
+            save_checkpoint(model, epoch)
 
 
 if __name__ == "__main__":
@@ -142,10 +162,9 @@ if __name__ == "__main__":
         dtype_str=dtype,
     )
 
-    # before_sample = model.sample(1000, sigma_1=0.01, n_timesteps=10)
-    # plot_highdim_samples(
-    #     denorm(before_sample.cpu()), f"outputs/sachs_samples_before.png"
-    # )
+    start_epoch = 5000
+    # Load previous checkpoint (if exists)
+    load_checkpoint(model, epoch=start_epoch)
 
     # Plot real Sachs data using existing function
     plot_highdim_samples(
@@ -158,6 +177,7 @@ if __name__ == "__main__":
         val_loader,
         denorm,
         pca,
+        start_epoch=start_epoch,
         epochs=2000,
         device_str=device,
         dtype_str=dtype,
