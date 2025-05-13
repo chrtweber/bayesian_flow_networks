@@ -231,10 +231,10 @@ if __name__ == "__main__":
         dtype_str=dtype,
     )
 
-    start_epoch = 0
+    start_epoch = 2000
 
     # Load previous checkpoint (if exists)
-    # load_checkpoint(model, epoch=start_epoch)
+    load_checkpoint(model, epoch=start_epoch)
 
     # Plot real Sachs data using existing function
     plot_highdim_samples(

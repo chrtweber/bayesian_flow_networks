@@ -149,10 +149,22 @@ class ContinuousBFN(nn.Module):
         time = self._pad_to_dim(time)
         gamma = 1.0 - s1.pow(2.0 * time)
         std = (gamma * (1 - gamma) + self.eps).sqrt()
-        mu = gamma * x + std * t.randn_like(x)
+
+        # old loss
+        # mu = gamma * x + std * t.randn_like(x)
+        # x_pred = self.cts_output_prediction(
+        #     mu, time, gamma, cond, cond_scale, rescaled_phi
+        # )
+
+        # new loss, using SCM
+        mu = gamma * x + std * t.randn_like(x)  # still used as noise u
+        # Use SCM to produce z_causal
+        intervention_dict = {}  # no interventions during training
+        z_causal = self.scm(mu, interventions=intervention_dict)
         x_pred = self.cts_output_prediction(
-            mu, time, gamma, cond, cond_scale, rescaled_phi
+            z_causal, time, gamma, cond, cond_scale, rescaled_phi
         )
+
         diff = (x - x_pred).flatten(1).pow(2.0).sum(-1).sqrt()
         loss = -(s1.log() * diff / s1.pow(2 * time.view(-1)))
         return loss
