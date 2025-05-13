@@ -24,6 +24,10 @@ from torch.distributions import Categorical, Normal
 from torch_bfn.utils import str_to_torch_dtype, exists, default
 from torch_bfn.networks import BFNetwork, DiscreteBFNetwork
 
+import numpy as np
+import networkx as nx
+from torch_bfn.networks.scm import NeuralSCM
+
 
 class ContinuousBFN(nn.Module):
     def __init__(
@@ -47,9 +51,20 @@ class ContinuousBFN(nn.Module):
             eps: stability parameter
         """
         super().__init__()
+
         self.device = t.device(device_str)
         self.dtype = str_to_torch_dtype(dtype_str)
         self.dim = dim if isinstance(dim, Tuple) else (dim,)
+
+        # Load DAG and build causal mechanism
+        dag = np.load("examples/sachs/continuous/DAG1.npy")
+        self.topo_order = list(nx.topological_sort(nx.DiGraph(dag)))
+        self.scm = NeuralSCM(
+            num_vars=self.dim[0],
+            hidden_dim=64,
+            adj_matrix=dag,
+            topo_order=self.topo_order,
+        )
 
         dtype_eps = t.finfo(self.dtype).eps
         self.eps = eps if eps < dtype_eps else dtype_eps
@@ -234,6 +249,71 @@ class ContinuousBFN(nn.Module):
         self.net.train()
         if cond is not None:
             outputs = outputs.view(n_cond, n_samples, *outputs.shape[1:])
+        return outputs
+
+    @t.inference_mode()
+    def counterfactual_sample(
+        self,
+        x_obs: Tensor["B", "D"],
+        intervention_mask: Tensor["B", "D"],  # 1 where intervened, 0 otherwise
+        intervention_values: Tensor["B", "D"],  # values to replace in z_causal
+        sigma_1: float = 0.001,
+        n_timesteps: int = 20,
+        cond: Optional[Tensor["B", "C"]] = None,
+        cond_scale: Optional[float] = None,
+        rescaled_phi: Optional[float] = None,
+    ) -> Tensor["B", "D"]:
+        """
+        Generate counterfactual samples by performing a do-intervention
+        on the latent causal variable before reverse diffusion.
+
+        Args:
+            x_obs: factual input data
+            intervention_mask: tensor with 1s where intervention is applied
+            intervention_values: values to set for intervened variables
+        """
+        # Abduction: forward encode to noise-perturbed latent mu
+        s1 = t.tensor([sigma_1], device=self.device, dtype=self.dtype)
+        tkwargs = {"device": self.device, "dtype": self.dtype}
+        time = t.ones((x_obs.size(0),), **tkwargs)
+        time = self._pad_to_dim(time)
+        gamma = 1.0 - s1.pow(2.0 * time)
+        std = (gamma * (1 - gamma)).sqrt()
+        mu = gamma * x_obs + std * t.randn_like(x_obs)
+
+        # Intervene: override selected components of mu (zcausal)
+        # Abduction: treat mu as noisy latent u
+        u = mu
+
+        # Build intervention dict: {idx: [B, 1] tensor}
+        intervention_dict = {
+            idx: intervention_values[:, idx : idx + 1]
+            for idx in range(mu.shape[1])
+            if intervention_mask[0, idx] == 1
+        }
+
+        # Use causal mechanism to generate z
+        z_causal = self.scm(u, interventions=intervention_dict)
+
+        # Sampling loop: generate x_cf from intervened latent
+        rho = 1.0
+        for i in range(1, n_timesteps + 1):
+            t_step = t.tensor(((i - 1) / n_timesteps,), **tkwargs)
+            t_step = self._pad_to_dim(t_step)
+            gamma = 1.0 - s1.pow(2 * t_step)
+            x = self.cts_output_prediction(
+                z_causal, t_step, gamma, cond, cond_scale, rescaled_phi
+            )
+            alpha = s1.pow(-2 * i / n_timesteps) * (1 - s1.pow(2 / n_timesteps))
+            std = (1 / alpha + self.eps).sqrt()
+            y = x + std * t.randn_like(x)
+            z_causal = (rho * z_causal + alpha * y) / (rho + alpha)
+            rho = rho + alpha
+
+        t1 = self._pad_to_dim(t.tensor((1,), **tkwargs))
+        outputs = self.cts_output_prediction(
+            z_causal, t1, 1 - s1.pow(2.0), cond, cond_scale, rescaled_phi
+        )
         return outputs
 
 

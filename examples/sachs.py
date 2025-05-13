@@ -1,20 +1,16 @@
 import os
-import pandas as pd
 import matplotlib.pyplot as plt
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, TensorDataset, random_split
-
 
 from typing import Callable, Tuple
 from torchtyping import TensorType as Tensor
 from torch.utils.data import DataLoader, TensorDataset, random_split
-from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 
 from torch_bfn import ContinuousBFN, LinearNetwork
-from torch_bfn.utils import EMA, norm_denorm, str_to_torch_dtype
+from torch_bfn.utils import EMA, str_to_torch_dtype
 
 
 def load_sachs_dataset() -> (
@@ -60,13 +56,13 @@ def load_sachs_dataset() -> (
 
 def save_checkpoint(model, epoch: int, path: str = "trained_models"):
     os.makedirs(path, exist_ok=True)
-    fpath = os.path.join(path, f"bfn_epoch_{epoch}.pt")
+    fpath = os.path.join(path, f"bfn_scm_epoch_{epoch}.pt")
     torch.save(model.state_dict(), fpath)
     print(f"Saved checkpoint at: {fpath}")
 
 
 def load_checkpoint(model, epoch: int, path: str = "trained_models"):
-    fpath = os.path.join(path, f"bfn_epoch_{epoch}.pt")
+    fpath = os.path.join(path, f"bfn_scm_epoch_{epoch}.pt")
     model.load_state_dict(torch.load(fpath))
     print(f"Loaded checkpoint from: {fpath}")
     return model
@@ -79,7 +75,7 @@ def plot_highdim_samples(
     pause: float = 0.1,
 ):
     samples = denormed_samples.numpy()
-    samples_2d = pca.fit_transform(samples)
+    samples_2d = pca.transform(samples)
     plt.figure(figsize=(6, 4))
     plt.scatter(samples_2d[:, 0], samples_2d[:, 1], edgecolor="k", alpha=0.5)
     plt.title("BFN Samples (PCA) " + fpath)
@@ -94,6 +90,79 @@ def plot_highdim_samples(
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     plt.savefig(fpath)
     plt.close()
+
+
+def plot_counterfactual_trajectory(
+    model: ContinuousBFN,
+    x_obs: Tensor["1", "D"],
+    var_index: int,
+    var_name: str,
+    denorm: Callable[[Tensor], Tensor],
+    pca: PCA,
+    value_range=(-2.0, 2.0),
+    steps: int = 30,
+    sigma_1: float = 0.01,
+    n_timesteps: int = 10,
+    fpath: str = "outputs/counterfactual_traj.png",
+):
+    """
+    Plot a PCA trajectory of counterfactuals from intervening on a single variable.
+    """
+    x_obs = x_obs.to(model.device)
+    values = torch.linspace(value_range[0], value_range[1], steps).to(
+        model.device
+    )
+    cf_samples = []
+
+    for val in values:
+        intervention_mask = torch.zeros_like(x_obs)
+        intervention_values = x_obs.clone()
+        intervention_mask[:, var_index] = 1.0
+        intervention_values[:, var_index] = val
+
+        x_cf = model.counterfactual_sample(
+            x_obs=x_obs,
+            intervention_mask=intervention_mask,
+            intervention_values=intervention_values,
+            sigma_1=sigma_1,
+            n_timesteps=n_timesteps,
+        )
+        cf_samples.append(x_cf)
+
+    x_cf_stack = torch.cat(cf_samples, dim=0)
+    x_cf_denorm = denorm(x_cf_stack.cpu()).numpy()
+    x_obs_denorm = denorm(x_obs.cpu()).numpy()
+
+    # PCA projection
+    all_points = np.vstack([x_obs_denorm, x_cf_denorm])
+    points_2d = pca.transform(all_points)
+
+    plt.figure(figsize=(8, 6))
+    sc = plt.scatter(
+        points_2d[1:, 0],
+        points_2d[1:, 1],
+        c=values.cpu().numpy(),
+        cmap="coolwarm",
+        label=f"Counterfactuals do({var_name}=...)",
+    )
+    plt.scatter(
+        points_2d[0, 0],
+        points_2d[0, 1],
+        color="black",
+        s=100,
+        label="Factual",
+        edgecolor="white",
+    )
+    plt.colorbar(sc, label=f"Intervened {var_name} value")
+    plt.title(f"Counterfactual Trajectory via do({var_name}=...)")
+    plt.xlabel("PC1")
+    plt.ylabel("PC2")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+    plt.savefig(fpath)
+    plt.show()
 
 
 def train(
@@ -162,13 +231,57 @@ if __name__ == "__main__":
         dtype_str=dtype,
     )
 
-    start_epoch = 5000
+    start_epoch = 0
+
     # Load previous checkpoint (if exists)
-    load_checkpoint(model, epoch=start_epoch)
+    # load_checkpoint(model, epoch=start_epoch)
 
     # Plot real Sachs data using existing function
     plot_highdim_samples(
         denorm(X_norm), pca, fpath="outputs/sachs_real_samples.png", pause=3
+    )
+
+    # ---- Example counterfactual generation ----
+    print("\nGenerating counterfactual sample...")
+
+    # Step 1: Choose one factual observation
+    x_obs = X_norm[:1].to(model.device)  # First example, shape [1, 11]
+
+    # Step 2: Create intervention mask (e.g., intervene on variable 3)
+    intervention_mask = torch.zeros_like(x_obs)
+    intervention_mask[:, 3] = 1.0  # Intervene on 4th variable
+
+    # Step 3: Set the new value (e.g., increase variable 3)
+    intervention_values = x_obs.clone()
+    intervention_values[:, 3] = 1.5  # New (normalized) value for variable 3
+
+    # Step 4: Generate counterfactual
+    x_cf = model.counterfactual_sample(
+        x_obs=x_obs,
+        intervention_mask=intervention_mask,
+        intervention_values=intervention_values,
+        sigma_1=0.01,
+        n_timesteps=10,
+    )
+
+    # Step 5: Denormalize and show result
+    plot_highdim_samples(
+        denorm(x_cf.cpu()), pca, "outputs/sachs_counterfactual.png", pause=3
+    )
+    # -------------------------------------------
+
+    # Use real observation
+    x_obs = X_norm[:1]
+
+    # Plot counterfactual trajectory for MEK (index 3)
+    plot_counterfactual_trajectory(
+        model=model,
+        x_obs=x_obs,
+        var_index=3,
+        var_name="MEK",
+        denorm=denorm,
+        pca=pca,
+        fpath="outputs/cf_traj_mek.png",
     )
 
     train(
